@@ -18,7 +18,3 @@
 ## 目前的内容
 
 仓库刚刚建立，内容会随着 [LiteMiyu](https://github.com/miyu-agent/litemiyu) 的正式版一起加入。
-
-## 许可证
-
-这个仓库里的模板和脚本以 MIT 许可证发布。
