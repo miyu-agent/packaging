@@ -183,5 +183,15 @@ jobs:
           done
           publish litemiyu "tgz/litemiyu-${version}.tgz"
           if [ "${DRY_RUN}" != "true" ]; then
-            npm view "litemiyu@${version}" name version dist-tags
+            # npm 的索引要过一会儿才看得到刚发的版本：最多等两分钟。两分钟以后还看不到，多半是 npm 把这次发布放进了
+            # 暂存区（staged publishing）：这时包还没有上线，要维护者到 npmjs.com 账号设置的 Staged Packages 里批准。
+            for _ in $(seq 1 12); do
+              if npm view "litemiyu@${version}" name version dist-tags 2>/dev/null; then
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "::error::npm 上还看不到 litemiyu@${version}。上面四个包的 npm publish 都没有报错的话，它们是被放进了暂存区，还没有上线：请维护者到 npmjs.com 账号设置的 Staged Packages 里批准（批准要两步验证），批准以后不用重跑这个工作流。"
+            npm view litemiyu name version dist-tags || true
+            exit 1
           fi
