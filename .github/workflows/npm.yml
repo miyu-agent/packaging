@@ -105,14 +105,14 @@ jobs:
           cd "${RUNNER_TEMP}/try"
           echo '{"name":"try","private":true}' > package.json
           # 另外两个平台的包还没有发到 npm 上：它们是可选依赖，取不到不算错。
-          npm install "${tgz}/litemiyu-${version}.tgz" "${tgz}/miyu-agent-litemiyu-linux-x64-${version}.tgz"
+          # 先不让安装脚本跑（新的 npm 默认就不跑）：这时候命令是启动用的脚本。
+          npm install --ignore-scripts "${tgz}/litemiyu-${version}.tgz" "${tgz}/miyu-agent-litemiyu-linux-x64-${version}.tgz"
           wanted="litemiyu ${version}"
-          # 一、装完以后的脚本没有跑的样子（新的 npm 默认不跑）：命令是启动用的脚本。
-          if head -c 2 node_modules/litemiyu/bin/litemiyu | grep -q '#!'; then
-            printed=$(./node_modules/.bin/litemiyu --version)
-            echo "经启动脚本：${printed}"
-            [ "${printed}" = "${wanted}" ] || { echo "::error::应该是 ${wanted}"; exit 1; }
-          fi
+          # 一、经启动脚本。
+          head -c 2 node_modules/litemiyu/bin/litemiyu | grep -q '#!' || { echo "::error::没有跑安装脚本，命令却不是启动脚本"; exit 1; }
+          printed=$(./node_modules/.bin/litemiyu --version)
+          echo "经启动脚本：${printed}"
+          [ "${printed}" = "${wanted}" ] || { echo "::error::应该是 ${wanted}"; exit 1; }
           # 二、脚本跑过以后：命令就是程序，和压缩包里的一字不差。
           (cd node_modules/litemiyu && node install.js)
           printed=$(./node_modules/.bin/litemiyu --version)
