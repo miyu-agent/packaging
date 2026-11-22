@@ -183,15 +183,16 @@ jobs:
           done
           publish litemiyu "tgz/litemiyu-${version}.tgz"
           if [ "${DRY_RUN}" != "true" ]; then
-            # npm 的索引要过一会儿才看得到刚发的版本：最多等两分钟。两分钟以后还看不到，多半是 npm 把这次发布放进了
-            # 暂存区（staged publishing）：这时包还没有上线，要维护者到 npmjs.com 账号设置的 Staged Packages 里批准。
-            for _ in $(seq 1 12); do
+            # npm 收下一个包以后要处理一会儿才查得到（发的时候它会印「Your package is being processed and may take a few
+            # minutes to become available」）。第一次发的包，处理期间注册表上先只有一个 0.0.0-stage 的占位版本，处理完
+            # 才换成真的；这不是出错，也不用谁去批准（2026-11-22 第一次发时等了一分多钟）。这里最多等十分钟。
+            for _ in $(seq 1 60); do
               if npm view "litemiyu@${version}" name version dist-tags 2>/dev/null; then
                 exit 0
               fi
               sleep 10
             done
-            echo "::error::npm 上还看不到 litemiyu@${version}。上面四个包的 npm publish 都没有报错的话，它们是被放进了暂存区，还没有上线：请维护者到 npmjs.com 账号设置的 Staged Packages 里批准（批准要两步验证），批准以后不用重跑这个工作流。"
+            echo "::error::等了十分钟，npm 上还看不到 litemiyu@${version}。上面四个包的 npm publish 都印了「+ 包名@版本」的话，包已经交上去了：过一会儿再用 npm view litemiyu 看，不要重发。"
             npm view litemiyu name version dist-tags || true
             exit 1
           fi
