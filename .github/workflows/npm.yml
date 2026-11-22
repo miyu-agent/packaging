@@ -5,8 +5,9 @@
 # 1. prepare（不碰任何密钥）：取 litemiyu 仓库里的模板，下载这次发布的 SHA256SUMS 和三个压缩包，核对哈希和构建出处证明，
 #    用 `cargo xtask packaging --archives` 出四个包的目录（平台包里的程序就是压缩包里的那一份，一字不差），`npm pack` 打成
 #    四个 .tgz；在这台机器上装一遍、跑一下；再对每个 .tgz 做一遍 `npm publish --dry-run`。
-# 2. publish（只在不是演练时跑）：把上一步的四个 .tgz 原样发到 npm，先发三个平台包，最后发主包。已经发过的那个版本跳过，
-#    所以中途失败以后可以原样再跑一次。npm 的令牌只在这一步里出现，这一步不运行任何从别处下载的程序。
+# 2. publish：把上一步的四个 .tgz 原样发到 npm，先发三个平台包，最后发主包。已经发过的那个版本跳过，所以中途失败以后
+#    可以原样再跑一次。演练时这一步照样跑，每个包都带 --dry-run、不传令牌。npm 的令牌只在真发时、只在这一步里出现，
+#    这一步不运行任何从别处下载的程序。
 #
 # 预发布版（标签带 -rc.N）发在 rc 这个标记下，正式版发在 latest 下。
 #
@@ -139,7 +140,6 @@ jobs:
 
   publish:
     needs: prepare
-    if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -147,19 +147,26 @@ jobs:
         with:
           name: npm
           path: tgz
-      - name: 发到 npm
+      # 演练时这一步照样跑，只是每个包都带 --dry-run、不传令牌：发布用的命令和真发时是同一份，写错了演练就能看出来。
+      - name: 发到 npm（演练时只走一遍 --dry-run）
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ inputs.dry_run && '' || secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [ -n "${NPM_TOKEN}" ] || { echo "::error::这个仓库还没有设 NPM_TOKEN"; exit 1; }
           version="${TAG#v}"
           case "${TAG}" in *-rc.*) disttag=rc ;; *) disttag=latest ;; esac
-          # 令牌不写进文件：.npmrc 里只写变量的名字，npm 读的时候再从环境里取。
-          # shellcheck disable=SC2016
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > "${RUNNER_TEMP}/npmrc"
-          export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/npmrc"
+          extra=()
+          if [ "${DRY_RUN}" = "true" ]; then
+            extra=(--dry-run)
+          else
+            [ -n "${NPM_TOKEN}" ] || { echo "::error::这个仓库还没有设 NPM_TOKEN"; exit 1; }
+            # 令牌不写进文件：.npmrc 里只写变量的名字，npm 读的时候再从环境里取。
+            # shellcheck disable=SC2016
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > "${RUNNER_TEMP}/npmrc"
+            export NPM_CONFIG_USERCONFIG="${RUNNER_TEMP}/npmrc"
+          fi
           ls -l tgz
           publish() {
             local name="$1" file="$2"
@@ -167,11 +174,14 @@ jobs:
             if npm view "${name}@${version}" version >/dev/null 2>&1; then
               echo "${name}@${version} 已经在 npm 上，跳过"
             else
-              npm publish "${file}" --access public --tag "${disttag}"
+              # 路径要以 ./ 开头：npm 把「目录/文件」这样的写法当成 GitHub 仓库的简写。
+              npm publish "./${file}" --access public --tag "${disttag}" "${extra[@]}"
             fi
           }
           for platform in linux-x64 linux-arm64 darwin-arm64; do
             publish "@miyu-agent/litemiyu-${platform}" "tgz/miyu-agent-litemiyu-${platform}-${version}.tgz"
           done
           publish litemiyu "tgz/litemiyu-${version}.tgz"
-          npm view "litemiyu@${version}" name version dist-tags
+          if [ "${DRY_RUN}" != "true" ]; then
+            npm view "litemiyu@${version}" name version dist-tags
+          fi
