@@ -24,7 +24,7 @@
 | 工作流 | 做什么 | 密钥 |
 |---|---|---|
 | [`aur.yml`](.github/workflows/aur.yml) | 把 [LiteMiyu](https://github.com/miyu-agent/litemiyu) 的一次发布推送到 AUR（包名 `litemiyu-bin`） | `AUR_SSH_PRIVATE_KEY` |
-| [`npm.yml`](.github/workflows/npm.yml) | 把 LiteMiyu 的一次发布发到 npm（主包 `litemiyu` 和三个平台包） | `NPM_TOKEN` |
+| [`npm.yml`](.github/workflows/npm.yml) | 把 LiteMiyu 的一次发布发到 npm（主包发 `litemiyu` 和 `@miyu-agent/litemiyu` 两个名字，加三个平台包） | `NPM_TOKEN` |
 
 两个工作流都是手动触发，默认只演练，不向外推送。它们的做法相同：
 

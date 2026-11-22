@@ -24,7 +24,7 @@ The secrets used for publishing are stored only in this repository's settings; t
 | Workflow | What it does | Secret |
 |---|---|---|
 | [`aur.yml`](.github/workflows/aur.yml) | Pushes one release of [LiteMiyu](https://github.com/miyu-agent/litemiyu) to the AUR (package name `litemiyu-bin`) | `AUR_SSH_PRIVATE_KEY` |
-| [`npm.yml`](.github/workflows/npm.yml) | Publishes one release of LiteMiyu to npm (the main package `litemiyu` and three platform packages) | `NPM_TOKEN` |
+| [`npm.yml`](.github/workflows/npm.yml) | Publishes one release of LiteMiyu to npm (the main package under two names, `litemiyu` and `@miyu-agent/litemiyu`, plus three platform packages) | `NPM_TOKEN` |
 
 Both workflows are triggered by hand and default to a dry run that pushes nothing. They work the same way:
 

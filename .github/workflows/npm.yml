@@ -1,5 +1,5 @@
-# 把 LiteMiyu 的一次发布发到 npm：主包 litemiyu，加每个平台一个的包（@miyu-agent/litemiyu-linux-x64、-linux-arm64、
-# -darwin-arm64）。手动触发。
+# 把 LiteMiyu 的一次发布发到 npm：主包发两个名字（litemiyu 和 @miyu-agent/litemiyu，内容一样），加每个平台一个的包
+# （@miyu-agent/litemiyu-linux-x64、-linux-arm64、-darwin-arm64）。手动触发。
 #
 # 做法：
 # 1. prepare（不碰任何密钥）：取 litemiyu 仓库里的模板，下载这次发布的 SHA256SUMS 和三个压缩包，核对哈希和构建出处证明，
@@ -91,7 +91,7 @@ jobs:
           cargo xtask packaging "${TAG}" --sums "${RUNNER_TEMP}/assets/SHA256SUMS" --archives "${RUNNER_TEMP}/assets" --out "${RUNNER_TEMP}/out"
           mkdir -p "${RUNNER_TEMP}/tgz"
           cd "${RUNNER_TEMP}/tgz"
-          for dir in litemiyu-linux-x64 litemiyu-linux-arm64 litemiyu-darwin-arm64 litemiyu; do
+          for dir in litemiyu-linux-x64 litemiyu-linux-arm64 litemiyu-darwin-arm64 litemiyu litemiyu-scoped; do
             npm pack "${RUNNER_TEMP}/out/npm/${dir}"
           done
           ls -l
@@ -122,6 +122,14 @@ jobs:
           tar -xzf "${RUNNER_TEMP}/assets/litemiyu-${version}-linux-x86_64.tar.gz" -C "${RUNNER_TEMP}"
           cmp node_modules/litemiyu/bin/litemiyu "${RUNNER_TEMP}/litemiyu-${version}-linux-x86_64/litemiyu"
           cmp node_modules/@miyu-agent/litemiyu-linux-x64/bin/litemiyu "${RUNNER_TEMP}/litemiyu-${version}-linux-x86_64/litemiyu"
+          # 三、带组织前缀的那个名字（@miyu-agent/litemiyu）装出来是同一个程序。
+          mkdir -p "${RUNNER_TEMP}/try-scoped"
+          cd "${RUNNER_TEMP}/try-scoped"
+          echo '{"name":"try-scoped","private":true}' > package.json
+          npm install --ignore-scripts "${tgz}/miyu-agent-litemiyu-${version}.tgz" "${tgz}/miyu-agent-litemiyu-linux-x64-${version}.tgz"
+          printed=$(./node_modules/.bin/litemiyu --version)
+          echo "带前缀的名字：${printed}"
+          [ "${printed}" = "${wanted}" ] || { echo "::error::应该是 ${wanted}"; exit 1; }
       - name: 每个包照 npm publish --dry-run 过一遍
         env:
           TAG: ${{ inputs.tag }}
@@ -182,17 +190,19 @@ jobs:
             publish "@miyu-agent/litemiyu-${platform}" "tgz/miyu-agent-litemiyu-${platform}-${version}.tgz"
           done
           publish litemiyu "tgz/litemiyu-${version}.tgz"
+          publish "@miyu-agent/litemiyu" "tgz/miyu-agent-litemiyu-${version}.tgz"
           if [ "${DRY_RUN}" != "true" ]; then
             # npm 收下一个包以后要处理一会儿才查得到（发的时候它会印「Your package is being processed and may take a few
             # minutes to become available」）。第一次发的包，处理期间注册表上先只有一个 0.0.0-stage 的占位版本，处理完
             # 才换成真的；这不是出错，也不用谁去批准（2026-11-22 第一次发时等了一分多钟）。这里最多等十分钟。
             for _ in $(seq 1 60); do
-              if npm view "litemiyu@${version}" name version dist-tags 2>/dev/null; then
+              if npm view "litemiyu@${version}" name version dist-tags 2>/dev/null \
+                && npm view "@miyu-agent/litemiyu@${version}" name version dist-tags 2>/dev/null; then
                 exit 0
               fi
               sleep 10
             done
-            echo "::error::等了十分钟，npm 上还看不到 litemiyu@${version}。上面四个包的 npm publish 都印了「+ 包名@版本」的话，包已经交上去了：过一会儿再用 npm view litemiyu 看，不要重发。"
+            echo "::error::等了十分钟，npm 上还看不到 litemiyu@${version} 或者 @miyu-agent/litemiyu@${version}。上面五个包的 npm publish 都印了「+ 包名@版本」的话，包已经交上去了：过一会儿再用 npm view litemiyu 看，不要重发。"
             npm view litemiyu name version dist-tags || true
             exit 1
           fi
