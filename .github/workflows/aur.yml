@@ -1,0 +1,162 @@
+# 把 LiteMiyu 的一次发布推到 AUR（包名照模板里的 pkgname）。手动触发。
+#
+# 做法：
+# 1. prepare（不碰任何密钥）：取 litemiyu 仓库里的模板，下载这次发布的 SHA256SUMS 和两个 Linux 压缩包，核对哈希和构建出处证明，
+#    用 `cargo xtask packaging` 填出 PKGBUILD；在 Arch 的容器里出 .SRCINFO，再照这份 PKGBUILD 真打一个包、装上、跑一下、
+#    过一遍 namcap。打包时压缩包是 makepkg 自己照 PKGBUILD 里的地址从 GitHub Release 下载的，所以地址和哈希在这里就验过了。
+# 2. publish（只在不是演练时跑）：只做一件事，把上一步出的 PKGBUILD、.SRCINFO 推到 AUR。AUR 的私钥只在这一步里出现，
+#    这一步不运行任何从别处下载的程序。
+#
+# 第一次用、改了模板以后，都先照演练跑一遍（dry_run 默认是开着的）。
+#
+# 密钥：AUR_SSH_PRIVATE_KEY（它的公钥加在 AUR 账号上）。AUR 的主机公钥写死在下面，指纹和 aur.archlinux.org 首页公布的一样
+# （ED25519：SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4）。
+# 容器用 Docker Hub 上 Arch Linux 官方的 archlinux:base-devel，只在不碰密钥的那一步里用。
+
+name: aur
+run-name: AUR ${{ inputs.tag }}${{ inputs.dry_run && '（演练）' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: LiteMiyu 的发版标签，例如 v2026.11.0
+        required: true
+        type: string
+      templates_ref:
+        description: 模板取自 litemiyu 仓库的哪个分支、标签或提交；不写就是上面的标签
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 只演练：核对、试打、试装，不推到 AUR
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aur
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: miyu-agent/litemiyu
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: 标签的样子对
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "${TAG}" =~ ^v[0-9]{4}\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "::error::标签 ${TAG} 不是 v<年>.<月>.<序号> 或者带 -rc.N 的"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ inputs.templates_ref || inputs.tag }}
+          persist-credentials: false
+      - name: 下载这次发布的校验文件和两个 Linux 压缩包，核对哈希和构建出处
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p "${RUNNER_TEMP}/assets"
+          cd "${RUNNER_TEMP}/assets"
+          gh release download "${TAG}" -R "${SOURCE_REPO}" -p SHA256SUMS \
+            -p "litemiyu-${version}-linux-x86_64.tar.gz" -p "litemiyu-${version}-linux-aarch64.tar.gz"
+          for arch in x86_64 aarch64; do
+            file="litemiyu-${version}-linux-${arch}.tar.gz"
+            grep -E "  \*?${file//./\\.}\$" SHA256SUMS | sha256sum -c -
+            gh attestation verify "${file}" -R "${SOURCE_REPO}"
+          done
+      - name: 装上 rust-toolchain.toml 钉住的工具链
+        run: rustup toolchain install
+      - name: 填 PKGBUILD
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          cargo xtask packaging "${TAG}" --sums "${RUNNER_TEMP}/assets/SHA256SUMS" --out "${RUNNER_TEMP}/out"
+          cat "${RUNNER_TEMP}/out/aur/litemiyu/PKGBUILD"
+      - name: 在 Arch 的容器里出 .SRCINFO，照这份 PKGBUILD 真打、真装、跑一下
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/aur"
+          mkdir -p "${work}"
+          cp "${RUNNER_TEMP}/out/aur/litemiyu/PKGBUILD" "${work}/PKGBUILD"
+          chmod 777 "${work}"
+          docker run --rm -e VERSION="${TAG#v}" -v "${work}:/work" archlinux:base-devel bash -euo pipefail -c '
+            pacman -Syu --noconfirm --needed namcap >/dev/null
+            useradd -m builder
+            cd /work
+            su builder -c "makepkg --printsrcinfo > .SRCINFO"
+            su builder -c "makepkg -f"
+            package=$(ls ./*.pkg.tar.zst)
+            namcap PKGBUILD "${package}"
+            pacman -U --noconfirm "${package}"
+            printed=$(litemiyu --version)
+            echo "${printed}"
+            [ "${printed}" = "litemiyu ${VERSION}" ] || { echo "::error::装上的程序印的是 ${printed}，应该是 litemiyu ${VERSION}"; exit 1; }
+            pacman -Qkk "$(pacman -Qqp "${package}")"
+          '
+          cat "${work}/.SRCINFO"
+          mkdir -p "${RUNNER_TEMP}/publish"
+          cp "${work}/PKGBUILD" "${work}/.SRCINFO" "${RUNNER_TEMP}/publish/"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aur
+          path: |
+            ${{ runner.temp }}/publish/PKGBUILD
+            ${{ runner.temp }}/publish/.SRCINFO
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: prepare
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: aur
+          path: files
+      - name: 推到 AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          ls -la files
+          name=$(sed -n 's/^pkgbase = //p' files/.SRCINFO)
+          [[ "${name}" =~ ^litemiyu(-bin)?$ ]] || { echo "::error::包名 ${name} 不是这个工作流该推的"; exit 1; }
+          # 提交的署名照 PKGBUILD 第一行的维护者。
+          maintainer=$(sed -n '1s/^# Maintainer: //p' files/PKGBUILD)
+          [ -n "${maintainer}" ] || { echo "::error::PKGBUILD 第一行不是 # Maintainer: …"; exit 1; }
+          install -d -m 700 ~/.ssh
+          (umask 077; printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur)
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=~/.ssh/known_hosts'
+          git clone "ssh://aur@aur.archlinux.org/${name}.git" repo
+          cp files/PKGBUILD files/.SRCINFO repo/
+          cd repo
+          git config user.name "${maintainer%% <*}"
+          email="${maintainer##*<}"
+          git config user.email "${email%>}"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "AUR 上已经是这一份，没有要推的"
+          else
+            git commit -m "${TAG#v}"
+            git push origin HEAD:master
+          fi
+          rm -f ~/.ssh/aur
