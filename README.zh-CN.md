@@ -24,9 +24,10 @@
 | 工作流 | 做什么 | 密钥 |
 |---|---|---|
 | [`aur.yml`](.github/workflows/aur.yml) | 把 [LiteMiyu](https://github.com/miyu-agent/litemiyu) 的一次发布推送到 AUR（包名 `litemiyu-bin`） | `AUR_SSH_PRIVATE_KEY` |
-| [`npm.yml`](.github/workflows/npm.yml) | 把 LiteMiyu 的一次发布发到 npm（主包发 `litemiyu` 和 `@miyu-agent/litemiyu` 两个名字，加三个平台包） | `NPM_TOKEN` |
 
-两个工作流都是手动触发，默认只演练，不向外推送。它们的做法相同：
+npm 不在这里发：从 2026.11.3 起，LiteMiyu 的 npm 包由它自己仓库的 `npm.yml` 用 npm 的可信发布（Trusted Publishing）发出，不使用令牌。
+
+这个工作流手动触发，默认只演练，不向外推送。它的做法是：
 
 1. 从程序的仓库获取模板，从它的发行版页面下载压缩包和校验文件，核对哈希和构建出处证明。
 2. 填好模板，在不接触密钥的环境里实际安装一遍、运行一次。
@@ -41,11 +42,9 @@
 ```bash
 # 先演练
 gh workflow run aur.yml -R miyu-agent/packaging -f tag=v2026.11.0
-gh workflow run npm.yml -R miyu-agent/packaging -f tag=v2026.11.0
 
 # 演练通过以后再正式发布
 gh workflow run aur.yml -R miyu-agent/packaging -f tag=v2026.11.0 -f dry_run=false
-gh workflow run npm.yml -R miyu-agent/packaging -f tag=v2026.11.0 -f dry_run=false
 ```
 
 标签对应的发行版必须已经公开，草稿状态的发行版无法下载。

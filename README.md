@@ -24,9 +24,10 @@ The secrets used for publishing are stored only in this repository's settings; t
 | Workflow | What it does | Secret |
 |---|---|---|
 | [`aur.yml`](.github/workflows/aur.yml) | Pushes one release of [LiteMiyu](https://github.com/miyu-agent/litemiyu) to the AUR (package name `litemiyu-bin`) | `AUR_SSH_PRIVATE_KEY` |
-| [`npm.yml`](.github/workflows/npm.yml) | Publishes one release of LiteMiyu to npm (the main package under two names, `litemiyu` and `@miyu-agent/litemiyu`, plus three platform packages) | `NPM_TOKEN` |
 
-Both workflows are triggered by hand and default to a dry run that pushes nothing. They work the same way:
+npm is not published from here: since 2026.11.3, LiteMiyu's npm packages are published by the `npm.yml` in its own repository through npm Trusted Publishing, without a token.
+
+The workflow is triggered by hand and defaults to a dry run that pushes nothing. It works like this:
 
 1. Take the template from the program's repository, download the archives and checksum files from its releases page, and check the hashes and the build provenance attestation.
 2. Fill in the template, then do a real install and one run in an environment that never touches the secrets.
@@ -41,11 +42,9 @@ Taking `v2026.11.0` as the example:
 ```bash
 # Dry run first
 gh workflow run aur.yml -R miyu-agent/packaging -f tag=v2026.11.0
-gh workflow run npm.yml -R miyu-agent/packaging -f tag=v2026.11.0
 
 # Publish for real once the dry run passes
 gh workflow run aur.yml -R miyu-agent/packaging -f tag=v2026.11.0 -f dry_run=false
-gh workflow run npm.yml -R miyu-agent/packaging -f tag=v2026.11.0 -f dry_run=false
 ```
 
 The release that the tag belongs to must already be public; a draft release cannot be downloaded.
